@@ -14,6 +14,9 @@
  *   node digest.js --feeds feeds.json # Custom feed list
  *   node digest.js --format telegram  # Telegram-friendly format (HTML)
  *   node digest.js --top 10           # Limit to top N items
+ *   node digest.js --output digest.json  # Write output to file
+ *   node digest.js --since 2026-02-05    # Only items since ISO date
+ *   node digest.js --dedup cache.json    # Skip URLs seen in previous runs
  * 
  * Output: JSON array of { source, title, url, published, summary }
  */
@@ -45,6 +48,9 @@ const HOURS = parseInt(getArg('hours', '24'), 10);
 const TOP_N = parseInt(getArg('top', '0'), 10);
 const DRY_RUN = hasFlag('dry-run');
 const FEED_FILE = getArg('feeds', null);
+const OUTPUT_FILE = getArg('output', null);
+const SINCE_DATE = getArg('since', null);
+const DEDUP_FILE = getArg('dedup', null);
 
 // --- HTTP fetch ---
 function fetch(url, redirects = 3) {
@@ -140,7 +146,17 @@ async function main() {
     feeds = JSON.parse(fs.readFileSync(FEED_FILE, 'utf8'));
   }
 
-  const cutoff = new Date(Date.now() - HOURS * 60 * 60 * 1000);
+  const cutoff = SINCE_DATE ? new Date(SINCE_DATE) : new Date(Date.now() - HOURS * 60 * 60 * 1000);
+  
+  // Load dedup cache
+  let seenCache = new Set();
+  if (DEDUP_FILE) {
+    try {
+      const cacheData = JSON.parse(require('fs').readFileSync(DEDUP_FILE, 'utf8'));
+      seenCache = new Set(cacheData.urls || []);
+      process.stderr.write(`📋 Dedup cache: ${seenCache.size} known URLs\n`);
+    } catch { /* no cache yet */ }
+  }
   let allItems = [];
   let errors = [];
 
@@ -178,13 +194,27 @@ async function main() {
     return new Date(b.published) - new Date(a.published);
   });
 
-  // Deduplicate by URL
+  // Deduplicate by URL (including dedup cache from previous runs)
   const seen = new Set();
   allItems = allItems.filter(item => {
     if (!item.url || seen.has(item.url)) return false;
+    if (seenCache.has(item.url)) return false;
     seen.add(item.url);
     return true;
   });
+  
+  // Update dedup cache
+  if (DEDUP_FILE) {
+    const allSeen = [...seenCache, ...seen];
+    // Keep last 2000 URLs to prevent unbounded growth
+    const trimmed = allSeen.slice(-2000);
+    require('fs').writeFileSync(DEDUP_FILE, JSON.stringify({ 
+      updated: new Date().toISOString(), 
+      count: trimmed.length,
+      urls: trimmed 
+    }, null, 2));
+    process.stderr.write(`💾 Dedup cache updated: ${trimmed.length} URLs\n`);
+  }
 
   if (DRY_RUN) {
     console.log(`\n📊 Total: ${allItems.length} items, ${errors.length} errors`);
@@ -196,38 +226,42 @@ async function main() {
     allItems = allItems.slice(0, TOP_N);
   }
 
-  // Output
+  // Build output string
+  let output;
   switch (FORMAT) {
-    case 'text':
-      console.log(`=== News Digest (${new Date().toISOString()}) ===\n`);
+    case 'text': {
+      let lines = [`=== News Digest (${new Date().toISOString()}) ===\n`];
       for (const item of allItems) {
-        console.log(`[${item.category}] ${item.title}`);
-        console.log(`  ${item.url}`);
-        if (item.summary) console.log(`  ${item.summary.slice(0, 150)}`);
-        console.log();
+        lines.push(`[${item.category}] ${item.title}`);
+        lines.push(`  ${item.url}`);
+        if (item.summary) lines.push(`  ${item.summary.slice(0, 150)}`);
+        lines.push('');
       }
-      console.log(`--- ${allItems.length} items from ${feeds.length} feeds ---`);
+      lines.push(`--- ${allItems.length} items from ${feeds.length} feeds ---`);
+      output = lines.join('\n');
       break;
+    }
 
-    case 'markdown':
-      console.log(`# News Digest — ${new Date().toISOString().slice(0, 10)}\n`);
+    case 'markdown': {
+      let lines = [`# News Digest — ${new Date().toISOString().slice(0, 10)}\n`];
       const byCategory = {};
       for (const item of allItems) {
         if (!byCategory[item.category]) byCategory[item.category] = [];
         byCategory[item.category].push(item);
       }
       for (const [cat, items] of Object.entries(byCategory)) {
-        console.log(`## ${cat.charAt(0).toUpperCase() + cat.slice(1)}\n`);
+        lines.push(`## ${cat.charAt(0).toUpperCase() + cat.slice(1)}\n`);
         for (const item of items) {
-          console.log(`- **[${item.title}](${item.url})** *(${item.source})*`);
-          if (item.summary) console.log(`  ${item.summary.slice(0, 120)}...`);
+          lines.push(`- **[${item.title}](${item.url})** *(${item.source})*`);
+          if (item.summary) lines.push(`  ${item.summary.slice(0, 120)}...`);
         }
-        console.log();
+        lines.push('');
       }
+      output = lines.join('\n');
       break;
+    }
 
-    case 'telegram':
-      // Telegram HTML format (concise, link-friendly)
+    case 'telegram': {
       const catEmoji = { ai: '🤖', tech: '💻', base: '🔵', devops: '⚙️', general: '📰' };
       let tg = `<b>📰 News Digest</b> — ${new Date().toISOString().slice(0, 10)}\n`;
       tg += `<i>${allItems.length} stories from ${feeds.length} feeds</i>\n\n`;
@@ -236,16 +270,25 @@ async function main() {
         tg += `${emoji} <a href="${item.url}">${escapeHtml(item.title)}</a>\n`;
         tg += `   <i>${item.source}</i>\n`;
       }
-      console.log(tg.trim());
+      output = tg.trim();
       break;
+    }
 
     case 'json':
     default:
-      console.log(JSON.stringify({ generated: new Date().toISOString(), hours: HOURS, count: allItems.length, errors, items: allItems }, null, 2));
+      output = JSON.stringify({ generated: new Date().toISOString(), hours: HOURS, count: allItems.length, errors, items: allItems }, null, 2);
   }
+
+  console.log(output);
+  return output;
 }
 
-main().catch(err => {
+main().then(output => {
+  if (OUTPUT_FILE && output) {
+    require('fs').writeFileSync(OUTPUT_FILE, output);
+    process.stderr.write(`📄 Output written to ${OUTPUT_FILE}\n`);
+  }
+}).catch(err => {
   console.error('Fatal:', err.message);
   process.exit(1);
 });

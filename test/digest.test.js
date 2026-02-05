@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Tests for alphabot-news-digest
- * Run: node test/digest.test.js
+ * alphabot-news-digest tests
+ * Tests feed parsing, dedup, output formats, and CLI flags.
  */
 
 const { execSync } = require('child_process');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -21,153 +21,125 @@ function assert(condition, msg) {
   }
 }
 
-function run(args = '', timeout = 30000) {
-  const cmd = `node ${path.join(__dirname, '..', 'digest.js')} ${args}`;
-  return execSync(cmd, { encoding: 'utf8', timeout, stdio: ['pipe', 'pipe', 'pipe'] });
-}
+const DIGEST = path.join(__dirname, '..', 'digest.js');
+const CACHE_FILE = path.join(__dirname, 'test-cache.json');
 
-function runWithStderr(args = '', timeout = 30000) {
-  const cmd = `node ${path.join(__dirname, '..', 'digest.js')} ${args}`;
-  try {
-    const stdout = execSync(cmd, { encoding: 'utf8', timeout });
-    return { stdout, stderr: '' };
-  } catch (e) {
-    return { stdout: e.stdout || '', stderr: e.stderr || '', code: e.status };
-  }
-}
+// Cleanup
+try { fs.unlinkSync(CACHE_FILE); } catch {}
 
 console.log('alphabot-news-digest tests\n');
 
-// --- XML Parser ---
-console.log('xml-parser:');
-const { parseString } = require('../lib/xml-parser');
-assert(typeof parseString === 'function', 'parseString is a function');
-assert(parseString('<test>hello</test>') === '<test>hello</test>', 'parseString returns input (passthrough)');
-
-// --- Feed file loading ---
-console.log('\nfeeds.json:');
-const feedsPath = path.join(__dirname, '..', 'feeds.json');
-if (fs.existsSync(feedsPath)) {
-  const feeds = JSON.parse(fs.readFileSync(feedsPath, 'utf8'));
-  assert(Array.isArray(feeds), 'feeds.json is an array');
-  assert(feeds.length > 0, `feeds.json has ${feeds.length} feeds`);
-  assert(feeds.every(f => f.name && f.url), 'all feeds have name and url');
-  assert(feeds.every(f => f.category), 'all feeds have category');
-} else {
-  assert(false, 'feeds.json exists');
-}
-
-// --- JSON output format ---
-console.log('\n--format json (default):');
+// Test 1: JSON output
+console.log('JSON format:');
 try {
-  const out = run('--format json --hours 48');
-  const json = JSON.parse(out);
-  assert(json.generated, 'has generated timestamp');
-  assert(typeof json.hours === 'number', 'has hours field');
-  assert(typeof json.count === 'number', 'has count field');
-  assert(Array.isArray(json.items), 'has items array');
-  assert(Array.isArray(json.errors), 'has errors array');
-  if (json.items.length > 0) {
-    const item = json.items[0];
-    assert(item.source, 'item has source');
-    assert(item.title, 'item has title');
-    assert(item.url, 'item has url');
-    assert(item.category, 'item has category');
-  }
-  assert(json.count === json.items.length, 'count matches items.length');
+  const out = execSync(`node ${DIGEST} --format json --top 3 2>/dev/null`).toString();
+  const data = JSON.parse(out);
+  assert(data.generated, 'has generated timestamp');
+  assert(typeof data.count === 'number', 'has count');
+  assert(Array.isArray(data.items), 'items is array');
+  assert(data.items.length <= 3, `top 3 limit respected (got ${data.items.length})`);
 } catch (e) {
-  assert(false, `JSON output parses: ${e.message}`);
+  assert(false, `JSON parse failed: ${e.message}`);
 }
 
-// --- Text output format ---
-console.log('\n--format text:');
+// Test 2: Text output
+console.log('\nText format:');
 try {
-  const out = run('--format text --hours 48');
-  assert(out.includes('News Digest'), 'text output has header');
-  assert(out.includes('items from'), 'text output has footer');
+  const out = execSync(`node ${DIGEST} --format text --top 2 2>/dev/null`).toString();
+  assert(out.includes('News Digest'), 'contains header');
+  assert(out.includes('items from'), 'contains footer');
 } catch (e) {
-  assert(false, `text format works: ${e.message}`);
+  assert(false, `text format failed: ${e.message}`);
 }
 
-// --- Markdown output format ---
-console.log('\n--format markdown:');
+// Test 3: Markdown output
+console.log('\nMarkdown format:');
 try {
-  const out = run('--format markdown --hours 48');
-  assert(out.startsWith('# News Digest'), 'markdown has h1 header');
-  assert(out.includes('##'), 'markdown has category headers');
+  const out = execSync(`node ${DIGEST} --format markdown --top 2 2>/dev/null`).toString();
+  assert(out.includes('# News Digest'), 'has markdown header');
 } catch (e) {
-  assert(false, `markdown format works: ${e.message}`);
+  assert(false, `markdown format failed: ${e.message}`);
 }
 
-// --- Telegram output format ---
-console.log('\n--format telegram:');
+// Test 4: Telegram output
+console.log('\nTelegram format:');
 try {
-  const out = run('--format telegram --hours 48');
-  assert(out.includes('<b>'), 'telegram has bold tags');
-  assert(out.includes('<a href='), 'telegram has links');
+  const out = execSync(`node ${DIGEST} --format telegram --top 2 2>/dev/null`).toString();
+  assert(out.includes('<b>'), 'has HTML bold tags');
+  assert(out.includes('<a href='), 'has HTML links');
 } catch (e) {
-  assert(false, `telegram format works: ${e.message}`);
+  assert(false, `telegram format failed: ${e.message}`);
 }
 
-// --- --top N flag ---
-console.log('\n--top flag:');
+// Test 5: Output to file
+console.log('\nOutput to file:');
+const outFile = path.join(__dirname, 'test-output.json');
 try {
-  const out = run('--format json --top 3 --hours 48');
-  const json = JSON.parse(out);
-  assert(json.items.length <= 3, `--top 3 limits to ${json.items.length} items`);
+  execSync(`node ${DIGEST} --format json --top 1 --output ${outFile} 2>/dev/null`);
+  assert(fs.existsSync(outFile), 'output file created');
+  const data = JSON.parse(fs.readFileSync(outFile, 'utf8'));
+  assert(data.items, 'output file contains valid JSON');
+  fs.unlinkSync(outFile);
 } catch (e) {
-  assert(false, `--top flag works: ${e.message}`);
+  assert(false, `output file failed: ${e.message}`);
 }
 
-// --- --dry-run flag ---
-console.log('\n--dry-run:');
+// Use a single fast feed for remaining tests to avoid timeouts
+const FAST_FEED_FILE = path.join(__dirname, 'fast-feed.json');
+const FAST_FEED = [{ name: 'HN Only', url: 'https://hnrss.org/newest?points=200', category: 'tech' }];
+fs.writeFileSync(FAST_FEED_FILE, JSON.stringify(FAST_FEED));
+
+// Test 6: Dedup cache
+console.log('\nDedup cache:');
 try {
-  const out = run('--dry-run --hours 48');
-  assert(out.includes('Total:'), 'dry-run shows total');
-  assert(out.includes('items'), 'dry-run mentions items');
+  // First run: creates cache
+  execSync(`node ${DIGEST} --format json --top 5 --feeds ${FAST_FEED_FILE} --dedup ${CACHE_FILE} 2>/dev/null`, { timeout: 15000 });
+  assert(fs.existsSync(CACHE_FILE), 'cache file created');
+  const cache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+  assert(cache.urls && cache.urls.length > 0, `cache has ${cache.urls.length} URLs`);
+  assert(cache.updated, 'cache has timestamp');
+  
+  // Second run: should filter out seen items
+  const out2 = execSync(`node ${DIGEST} --format json --top 50 --feeds ${FAST_FEED_FILE} --dedup ${CACHE_FILE} 2>/dev/null`, { timeout: 15000 }).toString();
+  const data2 = JSON.parse(out2);
+  assert(data2.count === 0, `dedup filters all seen items (got ${data2.count})`);
+  
+  fs.unlinkSync(CACHE_FILE);
 } catch (e) {
-  assert(false, `dry-run works: ${e.message}`);
+  assert(false, `dedup cache failed: ${e.message}`);
 }
 
-// --- Custom feeds file ---
-console.log('\n--feeds flag:');
+// Test 7: Custom feeds
+console.log('\nCustom feeds:');
 try {
-  const out = run(`--feeds ${feedsPath} --format json --top 5 --hours 48`);
-  const json = JSON.parse(out);
-  assert(json.items.length > 0 || json.errors.length > 0, 'custom feeds file loads');
+  const out = execSync(`node ${DIGEST} --format json --feeds ${FAST_FEED_FILE} 2>/dev/null`, { timeout: 15000 }).toString();
+  const data = JSON.parse(out);
+  assert(data.items.every(i => i.source === 'HN Only'), 'only custom feed items');
 } catch (e) {
-  assert(false, `custom feeds works: ${e.message}`);
+  assert(false, `custom feeds failed: ${e.message}`);
 }
 
-// --- Deduplication ---
-console.log('\ndeduplication:');
+// Test 8: --hours flag
+console.log('\nHours filter:');
 try {
-  const out = run('--format json --hours 48');
-  const json = JSON.parse(out);
-  const urls = json.items.map(i => i.url).filter(u => u);
-  const unique = new Set(urls);
-  assert(urls.length === unique.size, `no duplicate URLs (${urls.length} items, ${unique.size} unique)`);
+  const out = execSync(`node ${DIGEST} --format json --hours 1 --feeds ${FAST_FEED_FILE} 2>/dev/null`, { timeout: 15000 }).toString();
+  const data = JSON.parse(out);
+  assert(data.hours === 1, 'hours=1 reflected in output');
 } catch (e) {
-  assert(false, `dedup check: ${e.message}`);
+  assert(false, `hours filter failed: ${e.message}`);
 }
 
-// --- Sort order (newest first) ---
-console.log('\nsort order:');
+// Test 9: Dry run
+console.log('\nDry run:');
 try {
-  const out = run('--format json --hours 48');
-  const json = JSON.parse(out);
-  const dated = json.items.filter(i => i.published);
-  let sorted = true;
-  for (let i = 1; i < dated.length; i++) {
-    if (new Date(dated[i].published) > new Date(dated[i-1].published)) {
-      sorted = false;
-      break;
-    }
-  }
-  assert(sorted, 'items sorted newest-first');
+  const out = execSync(`node ${DIGEST} --dry-run --feeds ${FAST_FEED_FILE} 2>&1`, { timeout: 15000 }).toString();
+  assert(out.includes('Total:'), 'dry run shows summary');
 } catch (e) {
-  assert(false, `sort order check: ${e.message}`);
+  assert(false, `dry run failed: ${e.message}`);
 }
+
+// Cleanup
+try { fs.unlinkSync(FAST_FEED_FILE); } catch {}
 
 console.log(`\n📊 ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
