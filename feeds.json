@@ -1,0 +1,12 @@
+[
+  { "name": "Hacker News (Top)", "url": "https://hnrss.org/newest?points=100", "category": "tech" },
+  { "name": "The Verge - AI", "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "category": "ai" },
+  { "name": "MIT Tech Review", "url": "https://www.technologyreview.com/feed/", "category": "ai" },
+  { "name": "Base Blog", "url": "https://base.mirror.xyz/feed/atom", "category": "base" },
+  { "name": "Simon Willison", "url": "https://simonwillison.net/atom/everything/", "category": "ai" },
+  { "name": "Anthropic Blog", "url": "https://www.anthropic.com/rss.xml", "category": "ai" },
+  { "name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "category": "ai" },
+  { "name": "Ars Technica - AI", "url": "https://feeds.arstechnica.com/arstechnica/features", "category": "tech" },
+  { "name": "TechCrunch - AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "category": "ai" },
+  { "name": "Kubernetes Blog", "url": "https://kubernetes.io/feed.xml", "category": "devops" }
+]

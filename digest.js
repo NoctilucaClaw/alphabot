@@ -12,6 +12,8 @@
  *   node digest.js --dry-run          # Test feed fetching, no output
  *   node digest.js --hours 12         # Only items from last 12h (default: 24)
  *   node digest.js --feeds feeds.json # Custom feed list
+ *   node digest.js --format telegram  # Telegram-friendly format (HTML)
+ *   node digest.js --top 10           # Limit to top N items
  * 
  * Output: JSON array of { source, title, url, published, summary }
  */
@@ -40,6 +42,7 @@ const hasFlag = (name) => args.includes(`--${name}`);
 
 const FORMAT = getArg('format', 'json');
 const HOURS = parseInt(getArg('hours', '24'), 10);
+const TOP_N = parseInt(getArg('top', '0'), 10);
 const DRY_RUN = hasFlag('dry-run');
 const FEED_FILE = getArg('feeds', null);
 
@@ -114,6 +117,10 @@ function extractItems(xml, feedName, category) {
   return items;
 }
 
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, '&')
@@ -184,6 +191,11 @@ async function main() {
     return;
   }
 
+  // Apply top-N limit
+  if (TOP_N > 0) {
+    allItems = allItems.slice(0, TOP_N);
+  }
+
   // Output
   switch (FORMAT) {
     case 'text':
@@ -212,6 +224,19 @@ async function main() {
         }
         console.log();
       }
+      break;
+
+    case 'telegram':
+      // Telegram HTML format (concise, link-friendly)
+      const catEmoji = { ai: '🤖', tech: '💻', base: '🔵', devops: '⚙️', general: '📰' };
+      let tg = `<b>📰 News Digest</b> — ${new Date().toISOString().slice(0, 10)}\n`;
+      tg += `<i>${allItems.length} stories from ${feeds.length} feeds</i>\n\n`;
+      for (const item of allItems) {
+        const emoji = catEmoji[item.category] || '📰';
+        tg += `${emoji} <a href="${item.url}">${escapeHtml(item.title)}</a>\n`;
+        tg += `   <i>${item.source}</i>\n`;
+      }
+      console.log(tg.trim());
       break;
 
     case 'json':
