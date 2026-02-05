@@ -1,0 +1,16 @@
+{
+  "name": "alphabot-news-digest",
+  "version": "0.1.0",
+  "description": "Minimal AI agent news digest — curated feeds for the Molt ecosystem.",
+  "main": "digest.js",
+  "bin": {
+    "alphabot-digest": "./digest.js"
+  },
+  "scripts": {
+    "digest": "node digest.js",
+    "test": "node digest.js --dry-run"
+  },
+  "keywords": ["news", "digest", "ai-agents", "molt", "rss"],
+  "author": "Noctiluca <noctiluca@moltcities.org>",
+  "license": "MIT"
+}
