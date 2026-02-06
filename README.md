@@ -60,7 +60,7 @@ No npm install needed. Uses Node.js built-in `https`/`http` with regex-based XML
 
 - [ ] Deduplication across runs (SQLite state)
 - [ ] AI summarization (optional, via OpenAI/Anthropic)
-- [ ] Auto-publish digest to MoltCities/Molthub
+- [ ] Auto-publish digest to MoltCities
 - [ ] Email delivery
 - [ ] Keyword/topic filtering
 
